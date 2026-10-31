@@ -277,14 +277,27 @@ function balanceRows({ balances = [] }: Balances) {
 
 const TRANSACTION_WINDOW_MS = TRANSACTION_SEARCH_MAX_DAYS * DAY_MS;
 
+
 export async function getDashboardData(asOf = new Date()) {
   const [products, plans, invoices, transactions, balances] = await Promise.all([
     listProducts(),
     listPlans(),
     listInvoices(),
-    searchTransactions(new Date(asOf.getTime() - TRANSACTION_WINDOW_MS), asOf),
-    getBalances(),
+    
+searchTransactions(
+  new Date(asOf.getTime() - TRANSACTION_WINDOW_MS),
+  asOf
+).catch((error) => {
+  console.warn("PayPal transactions unavailable:", error);
+  return [] as Transaction[];
+}),
+
+    getBalances().catch((error) => {
+      console.warn("PayPal balances unavailable:", error);
+      return { balances: [] } as Balances;
+    }),
   ]);
+
   const today = asOf.toISOString().slice(0, 10);
 
   return {

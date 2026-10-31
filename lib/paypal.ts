@@ -62,6 +62,87 @@ async function get<T>(path: string): Promise<T> {
   }
 }
 
+
+async function post<T>(
+  path: string,
+  body: unknown,
+  requestId: string,
+): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${await accessToken()}`,
+      'Content-Type': 'application/json',
+      'PayPal-Request-Id': requestId,
+    },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  });
+
+  if (!res.ok) {
+    throw new PayPalApiError(res.status, path, await res.text());
+  }
+
+  return (await res.json()) as T;
+}
+
+export type CheckoutOrder = {
+  id: string;
+  status: string;
+  links?: { href: string; rel: string; method: string }[];
+  purchase_units?: {
+    amount?: Money;
+    payments?: {
+      captures?: {
+        id: string;
+        status: string;
+        amount?: Money;
+      }[];
+    };
+  }[];
+};
+
+// Server-defined demo product price.
+// Never accept the amount directly from the browser.
+export const RESCUE_PRODUCT = {
+  id: 'rescue-demo-product',
+  name: 'RescueCart Demo Product',
+  price: '10.00',
+  currency: 'USD',
+};
+
+export function createCheckoutOrder(requestId: string) {
+  return post<CheckoutOrder>(
+    '/v2/checkout/orders',
+    {
+      intent: 'CAPTURE',
+      purchase_units: [
+        {
+          reference_id: RESCUE_PRODUCT.id,
+          description: RESCUE_PRODUCT.name,
+          amount: {
+            currency_code: RESCUE_PRODUCT.currency,
+            value: RESCUE_PRODUCT.price,
+          },
+        },
+      ],
+    },
+    requestId,
+  );
+}
+
+export function captureCheckoutOrder(
+  orderId: string,
+  requestId: string,
+) {
+  return post<CheckoutOrder>(
+    `/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`,
+    {},
+    requestId,
+  );
+}
+
+
 // `path` must already carry whatever flag makes the endpoint report `total_pages`.
 async function listAll<T>(path: string, key: string, pageSize: number): Promise<T[]> {
   const items: T[] = [];
