@@ -1,158 +1,343 @@
-
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import { loadScript } from '@paypal/paypal-js';
 
+// Share the PayPal SDK loading promise
+// between component effect initializations.
+let paypalSdkPromise:
+  | ReturnType<typeof loadScript>
+  | null = null;
+
+function getPayPalSDK(clientId: string) {
+  if (!paypalSdkPromise) {
+    paypalSdkPromise = loadScript({
+      clientId,
+      currency: 'USD',
+      intent: 'capture',
+      components: ['buttons'],
+    }).catch((error) => {
+      // Allow a later attempt if loading fails.
+      paypalSdkPromise = null;
+      throw error;
+    });
+  }
+
+  return paypalSdkPromise;
+}
+
 export default function CheckoutButton() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [message, setMessage] = useState('Loading PayPal checkout...');
+  const checkoutLockRef = useRef(false);
+  const currentOrderIdRef = useRef<string | null>(null);
 
-  
-useEffect(() => {
-  let cancelled = false;
-  let buttons:
-    | { close: () => Promise<void> }
-    | undefined;
+  const [message, setMessage] = useState(
+    'Loading PayPal checkout...'
+  );
 
-  let rendered = false;
+  useEffect(() => {
+    let cancelled = false;
 
-  async function closeButtons() {
-    if (!buttons || !rendered) return;
+    let buttons:
+      | { close: () => Promise<void> }
+      | undefined;
 
-    const instance = buttons;
-    buttons = undefined;
-    rendered = false;
+    let rendered = false;
 
-    try {
-      await instance.close();
-    } catch (error) {
-      console.warn("PayPal cleanup:", error);
-    }
-  }
+    async function closeButtons() {
+      if (!buttons || !rendered) return;
 
-  async function setup() {
-    const clientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID;
+      const instance = buttons;
+      buttons = undefined;
+      rendered = false;
 
-    if (!clientId) {
-      setMessage("PayPal Client ID is not configured.");
-      return;
+      try {
+        await instance.close();
+      } catch (error) {
+        console.warn('PayPal cleanup:', error);
+      }
     }
 
-    try {
-      const paypal = await loadScript({
-        clientId,
-        currency: "USD",
-        intent: "capture",
-        components: ["buttons"],
-      });
+    async function setup() {
+      const clientId =
+        process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID;
 
-      if (cancelled) return;
-
-      if (!paypal || !paypal.Buttons) {
-        throw new Error("PayPal Buttons SDK failed to load");
-      }
-
-      if (!containerRef.current) return;
-
-      const instance = paypal.Buttons({
-        style: {
-          layout: "vertical",
-          shape: "rect",
-          label: "paypal",
-        },
-
-        async createOrder() {
-          const response = await fetch("/api/checkout", {
-            method: "POST",
-          });
-
-          const result = await response.json();
-
-          if (!response.ok || !result.id) {
-            throw new Error(
-              result.error || "Could not create order."
-            );
-          }
-
-          return result.id;
-        },
-
-        async onApprove(data) {
-          setMessage("Confirming payment...");
-
-          const response = await fetch("/api/checkout/capture", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              orderId: data.orderID,
-            }),
-          });
-
-          const result = await response.json();
-
-          if (!response.ok) {
-            setMessage(
-              result.error ||
-                "Payment confirmation needs attention."
-            );
-            return;
-          }
-
-          setMessage(
-            `Payment completed! Order: ${result.id ?? data.orderID}`
-          );
-        },
-
-        onCancel() {
-          setMessage("Checkout cancelled. You can try again.");
-        },
-
-        onError(error) {
-          console.error("PayPal checkout error:", error);
-          setMessage(
-            "Checkout encountered an error. Please try again."
-          );
-        },
-      });
-
-      buttons = instance;
-
-      await instance.render(containerRef.current);
-
-      rendered = true;
-
-      // If React cleaned up during rendering,
-      // close only after rendering has finished.
-      if (cancelled) {
-        await closeButtons();
-      }
-    } catch (error) {
-      console.error("PayPal setup failed:", error);
-
-      // Don't update state after this effect is cancelled.
-      if (!cancelled) {
+      if (!clientId) {
         setMessage(
-          "Could not load checkout. Please refresh and try again."
+          'PayPal Client ID is not configured.'
         );
+        return;
+      }
+
+      try {
+        const paypal = await getPayPalSDK(clientId);
+
+        if (cancelled) return;
+
+        if (!paypal || !paypal.Buttons) {
+          throw new Error(
+            'PayPal Buttons SDK failed to load'
+          );
+        }
+
+        if (!containerRef.current) return;
+
+        const instance = paypal.Buttons({
+          style: {
+            layout: 'vertical',
+            shape: 'rect',
+            label: 'paypal',
+          },
+
+          async createOrder() {
+            if (checkoutLockRef.current) {
+              throw new Error(
+                'Checkout is already in progress.'
+              );
+            }
+
+            checkoutLockRef.current = true;
+            currentOrderIdRef.current = null;
+
+            setMessage('Creating your checkout...');
+
+            try {
+              const response = await fetch(
+                '/api/checkout',
+                {
+                  method: 'POST',
+                }
+              );
+
+              const result = await response.json();
+
+              if (!response.ok || !result.id) {
+                throw new Error(
+                  result.error ||
+                    'Could not create order.'
+                );
+              }
+
+              // Remember the order for cancellation
+              // and status verification.
+              currentOrderIdRef.current = result.id;
+
+              return result.id;
+            } catch (error) {
+              checkoutLockRef.current = false;
+
+              setMessage(
+                'Could not start checkout. ' +
+                  'Please check payment status before retrying.'
+              );
+
+              throw error;
+            }
+          },
+
+          async onApprove(data) {
+            console.log("CALLBACK: onApprove", data.orderID);
+
+            const orderId = data.orderID;
+
+            if (!orderId) {
+              setMessage(
+                'Payment status needs verification.'
+              );
+              checkoutLockRef.current = false;
+              return;
+            }
+
+            setMessage('Confirming payment...');
+
+            try {
+              const response = await fetch(
+                '/api/checkout/capture',
+                {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    orderId,
+                  }),
+                }
+              );
+
+              const result = await response.json();
+
+              if (
+                result.status === 'COMPLETED' &&
+                result.databaseSync === 'completed'
+              ) {
+                setMessage(
+                  `Payment completed! Order: ${result.id}`
+                );
+              } else if (
+                result.status === 'COMPLETED' &&
+                result.databaseSync === 'required'
+              ) {
+                setMessage(
+                  'Payment succeeded at PayPal, ' +
+                    'but payment record needs reconciliation.'
+                );
+              } else if (response.status === 202) {
+                setMessage(
+                  'Payment is not confirmed as completed yet. ' +
+                    'Please check its status.'
+                );
+              } else {
+                setMessage(
+                  result.error ||
+                    'Payment status needs verification.'
+                );
+              }
+            } catch (error) {
+              console.error(
+                'Capture request error:',
+                error
+              );
+
+              setMessage(
+                'Payment status needs verification ' +
+                  'before retrying.'
+              );
+            } finally {
+              checkoutLockRef.current = false;
+            }
+          },
+
+          async onCancel() {
+            console.log(
+    "CALLBACK: onCancel",
+    currentOrderIdRef.current
+  );
+            const orderId =
+              currentOrderIdRef.current;
+
+            setMessage(
+              'Checkout closed. Checking payment status...'
+            );
+
+            try {
+              if (!orderId) {
+                setMessage(
+                  'Checkout closed. Payment status needs verification.'
+                );
+                return;
+              }
+
+              const response = await fetch(
+                `/api/checkout/status?orderId=${encodeURIComponent(
+                  orderId
+                )}`,
+                {
+                  cache: 'no-store',
+                }
+              );
+
+              const result = await response.json();
+
+              if (!response.ok) {
+                setMessage(
+                  'Checkout closed. Payment status needs verification.'
+                );
+                return;
+              }
+
+              switch (result.status) {
+                case 'completed':
+                  setMessage(
+                    `Payment completed! Order: ${orderId}`
+                  );
+                  break;
+
+                case 'approved':
+                  setMessage(
+                    'Payment approved but not completed. ' +
+                      'Please wait for verification.'
+                  );
+                  break;
+
+                case 'pending':
+                  setMessage(
+                    'Checkout closed. No completed payment ' +
+                      'was confirmed.'
+                  );
+                  break;
+
+                default:
+                  setMessage(
+                    'Payment status is unknown. ' +
+                      'Please check before retrying.'
+                  );
+              }
+            } catch (error) {
+              console.error(
+                'Cancellation status check failed:',
+                error
+              );
+
+              setMessage(
+                'Checkout closed. Payment status needs verification.'
+              );
+            } finally {
+              checkoutLockRef.current = false;
+            }
+          },
+
+          onError(error) {
+            console.error("CALLBACK: onError", error);
+            
+            console.error(
+              'PayPal checkout error:',
+              error
+            );
+
+            checkoutLockRef.current = false;
+
+            setMessage(
+              'Checkout encountered an error. ' +
+                'Payment status may need verification ' +
+                'before retrying.'
+            );
+          },
+        });
+
+        buttons = instance;
+
+        await instance.render(containerRef.current);
+
+        rendered = true;
+
+        if (cancelled) {
+          await closeButtons();
+        }
+      } catch (error) {
+        console.error(
+          'PayPal setup failed:',
+          error
+        );
+
+        if (!cancelled) {
+          setMessage(
+            'Could not load checkout. ' +
+              'Please refresh and try again.'
+          );
+        }
       }
     }
-  }
 
-  void setup();
+    void setup();
 
-  return () => {
-    cancelled = true;
+    return () => {
+      cancelled = true;
 
-    // Don't destroy Buttons while render() is still pending.
-    if (rendered) {
-      void closeButtons();
-    }
-  };
-}, []);
-
+      if (rendered) {
+        void closeButtons();
+      }
+    };
+  }, []);
 
   return (
     <section className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -168,7 +353,10 @@ useEffect(() => {
         $10.00 USD
       </p>
 
-      <div className="mt-6 min-h-12" ref={containerRef} />
+      <div
+        className="mt-6 min-h-12"
+        ref={containerRef}
+      />
 
       <p
         className="mt-4 text-sm text-gray-600"

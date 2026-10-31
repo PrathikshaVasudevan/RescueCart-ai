@@ -302,3 +302,9 @@ export type Balances = {
 export function getBalances(): Promise<Balances> {
   return get<Balances>('/v1/reporting/balances');
 }
+
+export async function getCheckoutOrder(orderId: string) {
+  const path = `/v2/checkout/orders/${encodeURIComponent(orderId)}`;
+
+  return get<CheckoutOrder>(path);
+}
