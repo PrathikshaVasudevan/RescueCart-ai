@@ -4,11 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node scripts/run-tests.cjs"
   },
   "dependencies": {
+    "@google/genai": "^3.2.0",
     "@paypal/paypal-js": "^11.3.0",
     "@supabase/supabase-js": "^2.118.0",
     "ag-grid-community": "36.2.0",

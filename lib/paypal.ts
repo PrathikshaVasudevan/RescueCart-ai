@@ -5,15 +5,52 @@
 const BASE_URL = 'https://api-m.sandbox.paypal.com';
 const MAX_ATTEMPTS = 4;
 
+function safePayPalDebugId(body: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (!parsed || typeof parsed !== 'object' || !('debug_id' in parsed)) return null;
+    const value = (parsed as { debug_id?: unknown }).debug_id;
+    return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 export class PayPalApiError extends Error {
+  readonly debugId: string | null;
+
   constructor(
     readonly status: number,
     readonly path: string,
     body: string,
+    readonly operation: PayPalApiOperation = 'paypal_api_request',
   ) {
     super(`PayPal ${status} on ${path}: ${body.slice(0, 300)}`);
     this.name = 'PayPalApiError';
+    this.debugId = safePayPalDebugId(body);
   }
+}
+
+export type PayPalApiOperation = 'oauth_token_acquisition' | 'checkout_order_lookup' | 'paypal_api_request';
+
+/** Return only safe diagnostic fields; never include a raw upstream body or an order ID. */
+export function paypalApiErrorDiagnostics(error: PayPalApiError, correlationId: string) {
+  let path: string;
+  if (error.operation === 'oauth_token_acquisition') {
+    path = '/v1/oauth2/token';
+  } else if (error.operation === 'checkout_order_lookup') {
+    path = '/v2/checkout/orders/:orderId';
+  } else {
+    path = '/paypal/unknown';
+  }
+
+  return {
+    operation: error.operation,
+    status: error.status,
+    path,
+    debugId: error.debugId,
+    correlationId,
+  };
 }
 
 let cachedToken: { value: string; expiresAt: number } | undefined;
@@ -33,7 +70,7 @@ async function accessToken(): Promise<string> {
     body: 'grant_type=client_credentials',
     cache: 'no-store',
   });
-  if (!res.ok) throw new PayPalApiError(res.status, '/v1/oauth2/token', await res.text());
+  if (!res.ok) throw new PayPalApiError(res.status, '/v1/oauth2/token', await res.text(), 'oauth_token_acquisition');
 
   const { access_token, expires_in } = (await res.json()) as { access_token: string; expires_in: number };
   // Refresh a minute early so an in-flight request never carries an expired token.
@@ -41,7 +78,7 @@ async function accessToken(): Promise<string> {
   return access_token;
 }
 
-async function get<T>(path: string): Promise<T> {
+async function get<T>(path: string, operation: PayPalApiOperation = 'paypal_api_request'): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     const res = await fetch(`${BASE_URL}${path}`, {
       headers: { Authorization: `Bearer ${await accessToken()}` },
@@ -58,7 +95,7 @@ async function get<T>(path: string): Promise<T> {
       await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 250));
       continue;
     }
-    throw new PayPalApiError(res.status, path, await res.text());
+    throw new PayPalApiError(res.status, path, await res.text(), operation);
   }
 }
 
@@ -91,12 +128,14 @@ export type CheckoutOrder = {
   status: string;
   links?: { href: string; rel: string; method: string }[];
   purchase_units?: {
+    reference_id?: string;
     amount?: Money;
     payments?: {
       captures?: {
         id: string;
         status: string;
         amount?: Money;
+        status_details?: { reason?: string };
       }[];
     };
   }[];
@@ -306,5 +345,5 @@ export function getBalances(): Promise<Balances> {
 export async function getCheckoutOrder(orderId: string) {
   const path = `/v2/checkout/orders/${encodeURIComponent(orderId)}`;
 
-  return get<CheckoutOrder>(path);
+  return get<CheckoutOrder>(path, 'checkout_order_lookup');
 }

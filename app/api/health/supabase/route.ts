@@ -1,35 +1,26 @@
-
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const testOrderId = `TEST-${crypto.randomUUID()}`;
-
-  const { data, error } = await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from("checkout_payments")
-    .insert({
-      paypal_order_id: testOrderId,
-      amount: 10.00,
-      currency: "USD",
-      status: "pending",
-    })
-    .select("id, paypal_order_id, status")
-    .single();
+    .select("id")
+    .limit(1);
 
   if (error) {
-    console.error("Test insert failed:", error.message);
+    // Keep database details in server logs; do not return them to anonymous callers.
+    console.error("Supabase health check failed:", error.message);
 
     return NextResponse.json(
-      { ok: false, message: error.message },
-      { status: 500 }
+      { ok: false, message: "Supabase is unavailable" },
+      { status: 503, headers: { "Cache-Control": "no-store" } }
     );
   }
 
-  return NextResponse.json({
-    ok: true,
-    message: "Test insert successful",
-    payment: data,
-  });
+  return NextResponse.json(
+    { ok: true, message: "Supabase is reachable" },
+    { headers: { "Cache-Control": "no-store" } }
+  );
 }

@@ -1,166 +1,120 @@
-<<<<<<< HEAD
-> [!TIP]
-> **PayPal AI Hackathon**
-> 
-> Win part of $69,750 in total prizes
-> 
-> Build What's Next with PayPal and AI is a global online hackathon inviting developers, designers, founders, students, and builders to create something new using PayPal and AI.
-> 
-> There are no prescribed problem statements and no set of tracks. Build an agent, an app, an automation, a new payment experience, a business tool, a social product, or something we haven't thought of yet.
-> 
-> https://paypalaihackathon.devpost.com
+# RescueCart AI
 
-# PayPal SDK data pages
+RescueCart AI is a hackathon demo combining a PayPal Sandbox checkout with payment tracking in Supabase and a PayPal reporting dashboard built with AG Grid and AG Studio.
 
-A Next.js app that reads PayPal sandbox data over the [PayPal REST API](https://developer.paypal.com/api/rest/) and shows it two ways:
+## Features
 
-- **Endpoint pages**: one [AG Grid](https://www.ag-grid.com/react-data-grid/) per PayPal endpoint the demo calls, showing what each returns.
-- **Dashboard** (`/dashboard`): an [AG Studio](https://www.ag-grid.com/studio/) report over all of that data, joined together, which you can edit and save in the browser.
+- `/store` — sample $10.00 USD checkout using PayPal JavaScript Buttons and PayPal Sandbox.
+- `/api/checkout` — creates the server-priced PayPal order and records it as pending in Supabase.
+- `/api/checkout/capture` — captures an approved order, verifies the completed capture and amount with PayPal, then updates its Supabase record.
+- `/api/checkout/status` — checks the latest PayPal order status and reconciles verified completed payments to Supabase.
+- `/recovery` — merchant Recovery Centre for tracked checkout payments, manual PayPal status verification, review history, and the Gemini-powered Payment Failure Analyst.
+- `/api/health/supabase` — read-only Supabase connectivity check.
+- `/dashboard` — live PayPal data in an AG Studio dashboard. Reports are saved in the current browser's local storage.
+- `/products`, `/plans`, `/invoices`, `/transactions`, and `/balances` — live PayPal endpoint data in AG Grid.
+- The optional AG Studio assistant uses the OpenAI Responses API through `/api/ai/responses`. It can help explore and edit dashboard reports; it does not currently recover failed payments or initiate payment actions.
 
-## Run locally
+This project is a sandbox demo. Recovery Centre uses HTTP Basic Auth configured with `RECOVERY_CENTRE_USERNAME` and `RECOVERY_CENTRE_PASSWORD`; set unique values and serve the merchant dashboard over HTTPS outside localhost. It does not automatically charge customers or retry payments.
 
-Requires Node.js 20.9 or later and a PayPal sandbox REST app ([developer.paypal.com](https://developer.paypal.com/dashboard/applications/sandbox)). The transactions and balances pages also need the app's **Transaction search** feature enabled.
+## Requirements
 
-```bash
-npm install
-cp env.example .env.local   # then fill in the values
-npm run dev
-```
+- Node.js 20.9 or later
+- A PayPal Sandbox REST app with checkout credentials
+- A Supabase project with the `checkout_payments` table and columns used by the checkout routes
+- A Gemini API key for Payment Failure Analyst
+- Optional: an AG Studio licence key and an OpenAI API key for the AG Studio assistant
 
-Open [http://localhost:3000](http://localhost:3000). Next.js only loads the dotted `.env.local`; it is git-ignored, so credentials stay out of the repo.
+The PayPal products, plans, invoices, transactions, and balances pages require corresponding Sandbox account data and API permissions. Transaction and balance reporting also depends on the PayPal app/account's reporting access.
 
-Other scripts: `npm run build` (production build), `npm run start` (serve the build), `npm run lint`.
+## Local setup
 
-### AG Studio licence (optional)
+1. Install dependencies:
 
-Set `AG_STUDIO` in `.env.local` to your AG Studio licence key. The dashboard passes it to `AgStudioProvider`.
-
-### AI assistant (optional)
-
-The AG Studio dashboard at `/dashboard` has an AI assistant backed by OpenAI. The key is taken from the first of these that is set; with neither, the assistant is hidden:
-
-1. `AG_STUDIO_OPENAI_API_KEY`, specific to this app. Put it in `.env.local` to choose the key for this demo.
-2. `OPENAI_API_KEY`, the name OpenAI's own tools use. If you already export one (e.g. in `~/.zshrc`), the demo uses it with no setup, and spends against it.
-
-A separate name is needed because Next.js prefers variables already in the environment over `.env.local`, so a globally exported `OPENAI_API_KEY` can't be overridden per project. The server logs which variable it used (never the key) the first time the assistant is configured.
-
-`OPENAI_MODELS` lists the model ids the assistant may use, comma-separated, first one the default (`gpt-5.4-mini` when unset); with two or more, the chat offers a model picker.
-
-The key never reaches the browser. Studio's adapter ([`openai-adapter.ts`](app/dashboard/studio/openai-adapter.ts), copied from the AG Studio docs) runs client-side and posts to this app's own [`/api/ai/responses`](app/api/ai/responses/route.ts), which adds the key, only allows the configured models, caps output tokens, and streams OpenAI's reply back.
-
-In production `.env.local` isn't deployed: set the variable in your host's environment (e.g. Vercel project settings, `docker run --env-file`, or a secrets manager), as with the PayPal credentials. The route has no auth or rate limiting, so don't deploy it publicly with a real key without adding one.
-
-## How it works
-
-```
-lib/paypal.ts            Every PayPal call: OAuth token, paging, retries, response types
-lib/dashboard-data.ts    Turns those responses into the dashboard's related tables
-app/(endpoints)/         One page per endpoint, each rendering an AG Grid
-app/dashboard/           The AG Studio dashboard
-app/api/ai/responses/    Server-side proxy for the dashboard's AI assistant
-```
-
-[`lib/paypal.ts`](lib/paypal.ts) calls the REST API with plain `fetch`, no SDK. It gets an OAuth access token with the client-credentials grant and caches it until just before it expires. It follows `page`/`total_pages` paging, and retries on 401, 429 and 5xx responses. Its types are hand-written for the fields this demo reads, in the API's own snake_case.
-
-Every page is a server component that calls `await connection()`, so it renders per request with live data instead of being prerendered at build time. PayPal credentials never leave the server.
-
-## Endpoint pages
-
-Each page in [`app/(endpoints)`](app/(endpoints)) calls one function in `lib/paypal.ts`, maps the response to flat rows, and passes them with plain column definitions to the shared [`DataGrid`](app/(endpoints)/data-grid.tsx). The page header shows the REST calls behind it.
-
-| Page | `lib/paypal.ts` function | REST calls |
-|---|---|---|
-| [`/products`](app/(endpoints)/products/page.tsx) | `listProducts()` | `GET /v1/catalogs/products`, then `GET /v1/catalogs/products/{id}` per product |
-| [`/plans`](app/(endpoints)/plans/page.tsx) | `listPlans()` | `GET /v1/billing/plans`, then `GET /v1/billing/plans/{id}` per plan |
-| [`/invoices`](app/(endpoints)/invoices/page.tsx) | `listInvoices()` | `GET /v2/invoicing/invoices`, then `GET /v2/invoicing/invoices/{id}` per invoice |
-| [`/transactions`](app/(endpoints)/transactions/page.tsx) | `searchTransactions(start, end)` | `GET /v1/reporting/transactions` |
-| [`/balances`](app/(endpoints)/balances/page.tsx) | `getBalances()` | `GET /v1/reporting/balances` |
-
-Things worth knowing about these endpoints:
-
-- **List endpoints return summaries.** Products have no type or category, plans no billing cycles, and invoices no line items, payments or refunds. So each record is fetched again in full, which is why these pages take a second or two.
-- **Billing plans keep their price in `billing_cycles`.** There is an optional `TRIAL` cycle, then the `REGULAR` cycle; `total_cycles: 0` means it bills until cancelled.
-- **Transaction Search covers at most 31 days per request** and rejects fractional seconds in dates. New activity can take up to three hours to appear. `fields=all` adds `payer_info` to each `transaction_info`. Event codes are [PayPal T-codes](https://developer.paypal.com/docs/transaction-search/transaction-event-codes/) (`T0001` = payout); status is `S` success, `P` pending, `D` denied, `V` reversed or `F` partially refunded.
-- **Amounts are decimal strings with a currency**, e.g. `{ "value": "2.99", "currency_code": "USD" }`. `amountOf()` turns them into numbers, and the grid formats money columns in each row's currency.
-
-### The grid
-
-Pages are server components, so the column definitions they pass to the grid must be plain data, with no functions. Money columns use the `type: 'money'` column type, defined in `data-grid.tsx`, which formats the value in the row's `currency`. Date columns use AG Grid's built-in `cellDataType: 'dateString'` or `'dateTimeString'`. Every column can be sorted and filtered, and the search box filters across all columns.
-
-## Dashboard
-
-[`/dashboard`](app/dashboard/page.tsx) fetches all five endpoints at once. [`lib/dashboard-data.ts`](lib/dashboard-data.ts) turns them into related tables: customers, invoices, invoice line items, invoice payments, products, plans, transactions, payouts and balances. AG Studio's data sources, relationships, theme, default report and AI assistant are configured in [`app/dashboard/studio`](app/dashboard/studio). Reports you create or edit are saved in the browser's localStorage.
-=======
-## RescueCart AI
-
-**AI-Powered Checkout Reliability & Revenue Recovery Platform**
-
-RescueCart AI aims to help businesses improve checkout reliability, identify payment issues, and recover potentially lost revenue through intelligent payment recovery workflows.
-
-### Problem Statement
-
-Checkout interruptions, payment failures, and unclear payment states can result in lost sales and a poor customer experience.
-
-RescueCart aims to address these challenges with a reliable checkout experience and smarter payment recovery.
-
-### Current Implementation
-
-- Next.js application using React and TypeScript
-- Tailwind CSS
-- PayPal JavaScript SDK integration
-- PayPal Sandbox checkout
-- Backend API for order creation
-- Backend API for payment capture
-- Payment confirmation UI
-
-### Tech Stack
-
-- Next.js
-- React
-- TypeScript
-- Tailwind CSS
-- PayPal JavaScript SDK
-- PayPal REST API
-
-### Current Progress
-
-- [x] Project setup
-- [x] PayPal Sandbox configuration
-- [x] PayPal checkout integration
-- [x] Order creation API
-- [x] Payment capture API
-- [x] Sandbox payment verification
-- [ ] Improve cancellation and payment state handling
-- [ ] Implement duplicate-checkout protection
-- [ ] Develop AI-powered recovery workflows
-- [ ] Complete end-to-end testing
-
-### Getting Started
-
-1. Clone the repository.
-2. Install dependencies:
-
-   ```bash
+   ```powershell
    npm install
    ```
 
-3. Configure your local `.env.local` file with your own PayPal Sandbox credentials. Use the environment variable names expected by the application.
+2. Copy the example environment file and fill in the values in `.env.local`:
 
-4. Start the development server:
+   ```powershell
+   Copy-Item env.example .env.local
+   ```
 
-   ```bash
+3. Set `PAYPAL_CLIENT_ID` and `PAYPAL_SECRET` to your PayPal Sandbox app credentials. Set `NEXT_PUBLIC_PAYPAL_CLIENT_ID` to the same Sandbox client ID; it is public and is used only to load the browser PayPal SDK.
+
+4. Set `SUPABASE_URL` and `SUPABASE_SECRET_KEY` for the Supabase project containing the existing `checkout_payments` table. The secret key is server-only and must never use a `NEXT_PUBLIC_` prefix.
+
+5. Set `GEMINI_API_KEY` for the Recovery Centre Payment Failure Analyst. `GEMINI_MODEL` is optional and defaults to `gemini-2.5-flash`.
+
+6. Set `RECOVERY_CENTRE_USERNAME` and `RECOVERY_CENTRE_PASSWORD` to protect the merchant Recovery Centre.
+
+7. Start the development server:
+
+   ```powershell
    npm run dev
    ```
 
-5. Open [http://localhost:3000](http://localhost:3000).
+8. Open [http://localhost:3000](http://localhost:3000), then choose the store, Recovery Centre, dashboard, or a data page.
 
-### Security
+`.env.local` is excluded from Git. Never paste credentials into source code, documentation, terminal output, or browser-visible variables.
 
-- Never commit `.env.local` or API secrets.
-- Use Sandbox credentials for development.
-- Do not store sensitive payment information in the frontend.
+## Environment variables
 
-### Project Status
+See [`env.example`](env.example) for every variable name used by the application.
 
-Currently under development for the PayPal AI Hackathon.
->>>>>>> rescuecart/main
+Required for checkout and payment tracking:
+
+- `PAYPAL_CLIENT_ID` and `PAYPAL_SECRET` — PayPal Sandbox REST credentials, used on the server.
+- `NEXT_PUBLIC_PAYPAL_CLIENT_ID` — matching Sandbox client ID for the PayPal browser SDK. This ID is intended to be public; do not put a secret here.
+- `SUPABASE_URL` and `SUPABASE_SECRET_KEY` — server-side Supabase connection and secret key.
+- `RECOVERY_CENTRE_USERNAME` and `RECOVERY_CENTRE_PASSWORD` — required server-only credentials protecting `/recovery` and `/api/recovery/*`.
+- `GEMINI_API_KEY` — required server-only credential for the Payment Failure Analyst.
+- `GEMINI_MODEL` — optional Gemini model ID for analysis; defaults to `gemini-2.5-flash`.
+
+Optional:
+
+- `AG_STUDIO` — AG Studio licence key for the dashboard.
+- `AG_STUDIO_OPENAI_API_KEY` — preferred OpenAI key for the AG Studio dashboard assistant. If it is unset, the server also accepts `OPENAI_API_KEY` from its environment.
+- `OPENAI_MODELS` — comma-separated OpenAI model IDs allowed by the AG Studio assistant. The first is the default. If unset, the code defaults to `gpt-5.4-mini`.
+
+The Payment Failure Analyst requires Recovery Centre HTTP Basic Auth but has no rate limiting. Use unique credentials and protect public deployments with appropriate usage controls.
+
+## Useful commands
+
+```powershell
+npm run dev
+npm run lint
+npx tsc --noEmit
+npm run build
+npm run start
+```
+
+## Payment flow notes
+
+The checkout amount and currency are defined on the server in `lib/paypal.ts`; the browser cannot set them. The capture route verifies PayPal's completed order and captured amount before marking the Supabase row completed. If PayPal capture succeeds but the database update fails, the response reports that reconciliation is needed; the status route can repair the record after checking PayPal.
+
+The Supabase health route performs a read-only check and does not add test payment rows. The database schema is managed outside this repository, so configure the existing table in Supabase before running checkout.
+
+The Recovery Centre reads tracked rows from `checkout_payments` and requires its review-history migration, `supabase/migrations/20261112000100_recovery_action_history.sql`. The AI analyst's reviewed-action history additionally requires `supabase/migrations/20261112000200_ai_recommendation_reviewed.sql`, applied after the review-history migration. Review and apply SQL manually in Supabase; the application never runs migrations. The action table references the existing unique `checkout_payments.paypal_order_id` key and grants access only to `service_role` while enabling RLS. Recovery and review activity is limited to payment orders already present in `checkout_payments`.
+
+The Recovery Centre Payment Failure Analyst uses Gemini through the official `@google/genai` SDK, configured with `GEMINI_API_KEY` and optional `GEMINI_MODEL`. It sends server-verified order status, amount/currency, capture statuses, and a PayPal-reported failure reason when present; it does not send payer details or order identifiers. Analysis uses structured JSON output and is advisory. Completed payments are summarized deterministically without a Gemini request, and the server never triggers retries or charges. AG Studio continues to use its separate OpenAI integration.
+
+## Project layout
+
+- `app/store/` — PayPal checkout UI.
+- `app/api/checkout/` — order creation, capture, and status routes.
+- `app/api/recovery/` — protected merchant recovery data and review actions.
+- `app/recovery/` — Recovery Centre interface.
+- `app/api/health/supabase/` — read-only database health route.
+- `app/(endpoints)/` — AG Grid PayPal endpoint pages.
+- `app/dashboard/` — AG Studio dashboard, report editor, and optional assistant.
+- `lib/paypal.ts` — server-side PayPal REST client and fixed demo product.
+- `lib/supabase-admin.ts` — server-only Supabase client.
+- `lib/dashboard-data.ts` — reporting data shaping.
+- `lib/recovery-store.ts` — server-only Recovery Centre queries and tracked-payment action checks.
+
+## Payment lifecycle migration
+
+Before using the updated checkout routes, review and apply `supabase/migrations/20261111000100_payment_lifecycle_reliability.sql` manually with the Supabase SQL editor. It verifies the existing unique PayPal order ID index and creates the service-role-only idempotency table; it does not modify existing payment rows or recreate the existing amount, capture ID, or status constraints. The application does not apply migrations automatically.
+
+The migration expects the existing `checkout_payments.paypal_order_id` column to have a valid, non-partial unique index. Review the existing schema before applying it. After applying the migration, restart the app and test with PayPal Sandbox.

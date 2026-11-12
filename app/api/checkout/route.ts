@@ -1,50 +1,41 @@
-
 import { NextResponse } from "next/server";
-import { createCheckoutOrder } from "@/lib/paypal";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { CheckoutLifecycleError, createIdempotentCheckoutOrder, isValidIdempotencyKey } from "@/lib/checkout-lifecycle";
+import { checkoutRepository } from "@/lib/checkout-store";
+import { createCheckoutOrder, getCheckoutOrder } from "@/lib/paypal";
 
 export const runtime = "nodejs";
 
-export async function POST() {
+export async function POST(request: Request) {
+  const idempotencyKey = request.headers.get("Idempotency-Key");
+  if (!isValidIdempotencyKey(idempotencyKey)) {
+    return NextResponse.json(
+      { error: "A valid Idempotency-Key UUID is required" },
+      { status: 400, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
   try {
-    // 1. Create PayPal order
-    const requestId = crypto.randomUUID();
-    const order = await createCheckoutOrder(requestId);
-
-    // 2. Save the order in Supabase
-    const { error } = await supabaseAdmin
-      .from("checkout_payments")
-      .insert({
-        paypal_order_id: order.id,
-        amount: 10.00,
-        currency: "USD",
-        status: "pending",
-      });
-
-    // 3. Handle database failure
-    if (error) {
-      console.error("Payment tracking insert failed:", {
-        orderId: order.id,
-        error: error.message,
-      });
-
+    const order = await createIdempotentCheckoutOrder(
+      idempotencyKey,
+      checkoutRepository,
+      { createOrder: createCheckoutOrder, getOrder: getCheckoutOrder },
+    );
+    return NextResponse.json(order, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    if (error instanceof CheckoutLifecycleError && error.code === "idempotency_expired") {
       return NextResponse.json(
-        {
-          error: "Order tracking could not be saved",
-          paymentStatus: "unknown",
-        },
-        { status: 503 }
+        { code: "IDEMPOTENCY_WINDOW_EXPIRED", error: "Checkout creation status needs merchant review before a new order is created", status: "unknown" },
+        { status: 409, headers: { "Cache-Control": "no-store" } },
       );
     }
 
-    // 4. Return the order to frontend
-    return NextResponse.json(order);
-  } catch (error) {
-    console.error("Create checkout order error:", error);
-
+    // Log only an error class, never upstream response bodies, credentials, or access tokens.
+    console.error("Checkout order creation failed", {
+      errorType: error instanceof Error ? error.name : "unknown",
+    });
     return NextResponse.json(
-      { error: "Failed to create PayPal order" },
-      { status: 500 }
+      { error: "Checkout could not be confirmed. Retry with the same checkout attempt." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
 }

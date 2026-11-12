@@ -1,6 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import Link from 'next/link';
 import { BellIcon, HelpIcon } from './ui/icons';
 import { AgStudioLogo } from './ui/logo';
 
@@ -32,6 +33,11 @@ function TopBar() {
   return (
     <header className="flex h-16 shrink-0 items-center gap-6 border-b border-pp-border bg-white px-6">
       <BrandLockup />
+      <nav aria-label="Merchant tools" className="hidden items-center gap-4 text-sm font-semibold text-pp-muted md:flex">
+        <Link href="/dashboard" className="hover:text-pp-blue">PayPal reports</Link>
+        <Link href="/recovery" className="hover:text-pp-blue">Recovery Centre</Link>
+        <Link href="/store" className="hover:text-pp-blue">Checkout</Link>
+      </nav>
       <div className="ml-auto flex items-center gap-1 text-pp-navy">
         <span className="inline-flex size-9 items-center justify-center rounded-full" title="Help">
           <HelpIcon />

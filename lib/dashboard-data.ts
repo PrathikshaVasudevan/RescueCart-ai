@@ -6,6 +6,7 @@ import {
   listProducts,
   searchTransactions,
   TRANSACTION_SEARCH_MAX_DAYS,
+  PayPalApiError,
   type Balances,
   type IntervalUnit,
   type Invoice,
@@ -277,14 +278,39 @@ function balanceRows({ balances = [] }: Balances) {
 
 const TRANSACTION_WINDOW_MS = TRANSACTION_SEARCH_MAX_DAYS * DAY_MS;
 
+export type DashboardLoaders = {
+  listProducts: typeof listProducts;
+  listPlans: typeof listPlans;
+  listInvoices: typeof listInvoices;
+  searchTransactions: typeof searchTransactions;
+  getBalances: typeof getBalances;
+};
 
-export async function getDashboardData(asOf = new Date()) {
-  const [products, plans, invoices, transactions, balances] = await Promise.all([
-    listProducts(),
-    listPlans(),
-    listInvoices(),
+const defaultLoaders: DashboardLoaders = {
+  listProducts,
+  listPlans,
+  listInvoices,
+  searchTransactions,
+  getBalances,
+};
+
+export async function getDashboardData(asOf = new Date(), loaders: DashboardLoaders = defaultLoaders) {
+  const [products, plans, invoiceResult, transactions, balances] = await Promise.all([
+    loaders.listProducts(),
+    loaders.listPlans(),
+    loaders.listInvoices().then((invoices) => ({ availability: 'available' as const, invoices })).catch((error: unknown) => {
+      if (error instanceof PayPalApiError && error.status === 403) {
+        // Keep diagnostics useful without logging PayPal's response body or any credentials.
+        console.warn('PayPal invoicing permission unavailable', {
+          status: error.status,
+          endpoint: '/v2/invoicing/invoices',
+        });
+        return { availability: 'permission-unavailable' as const, invoices: [] as Invoice[] };
+      }
+      throw error;
+    }),
     
-searchTransactions(
+loaders.searchTransactions(
   new Date(asOf.getTime() - TRANSACTION_WINDOW_MS),
   asOf
 ).catch((error) => {
@@ -292,16 +318,18 @@ searchTransactions(
   return [] as Transaction[];
 }),
 
-    getBalances().catch((error) => {
+    loaders.getBalances().catch((error) => {
       console.warn("PayPal balances unavailable:", error);
       return { balances: [] } as Balances;
     }),
   ]);
 
+  const invoices = invoiceResult.invoices;
   const today = asOf.toISOString().slice(0, 10);
 
   return {
     asOf: asOf.toISOString(),
+    invoiceAvailability: invoiceResult.availability,
     customers: customerRows(invoices),
     invoices: invoiceRows(invoices, today),
     invoiceItems: invoiceItemRows(invoices),

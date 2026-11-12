@@ -67,6 +67,28 @@ const NO_HISTORY: StudioHistory = { canUndo: false, canRedo: false };
 
 const noSubscription = () => () => {};
 
+function pageUsesInvoiceData(page: AgReportState['pages'][number] | undefined) {
+  if (!page) return false;
+  return /(?:invoices|invoiceItems|invoicePayments)\.[A-Za-z_]/.test(JSON.stringify(page));
+}
+
+function InvoicePermissionUnavailable() {
+  return (
+    <div role="alert" className="flex h-full min-h-64 items-center justify-center p-6 sm:p-10">
+      <section className="w-full max-w-xl rounded-2xl border border-amber-200 bg-white p-7 text-center shadow-sm">
+        <span className="mx-auto flex size-14 items-center justify-center rounded-full bg-amber-100 text-amber-800">
+          <span aria-hidden="true" className="text-2xl font-bold">!</span>
+        </span>
+        <h2 className="mt-4 text-xl font-semibold text-pp-navy">Invoicing API permission unavailable</h2>
+        <p className="mt-2 text-sm leading-6 text-pp-muted">
+          PayPal denied access to invoice data for this app or account. Invoice reports are hidden so unavailable invoice totals are not presented as zero. Check the app&apos;s Invoicing API permissions and account access, then reload the dashboard.
+        </p>
+        <p className="mt-3 text-sm text-pp-muted">Other available reports remain accessible from the sidebar.</p>
+      </section>
+    </div>
+  );
+}
+
 export function Dashboard(props: DashboardProps) {
   // Saved reports live in localStorage, which only exists in the browser.
   const inBrowser = useSyncExternalStore(
@@ -96,6 +118,8 @@ function ReportsDashboard({ data, licenseKey, aiModels }: DashboardProps) {
   const [initialState] = useState(() => reportState.withFiltersPanelFor('view', saved.state));
   const state = studioState ?? initialState;
   const studioData = useMemo(() => buildStudioData(data), [data]);
+  const selectedPage = state.pages.find((page) => page.id === state.selectedPageId);
+  const invoicePageUnavailable = data.invoiceAvailability === 'permission-unavailable' && pageUsesInvoiceData(selectedPage);
   // `ai` is read once, when Studio is created.
   const ai = useMemo(() => (aiModels?.length ? buildAi(aiModels) : undefined), [aiModels]);
 
@@ -255,33 +279,40 @@ function ReportsDashboard({ data, licenseKey, aiModels }: DashboardProps) {
         }
       />
 
-      <div className="min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1">
         {hasData(data) ? (
-          <AgStudioProvider licenseKey={licenseKey} modules={ai ? [AgStudioAiModule] : undefined}>
-            <AgStudio
-              style={{ height: '100%', width: '100%' }}
-              theme={agStudioPayPalTheme}
-              layout={{ widgetBorderEnabled: true }}
-              data={studioData}
-              ai={ai}
-              initialState={initialState}
-              mode={mode}
-              onApiReady={(event) => {
-                apiRef.current = event.api;
-              }}
-              onStudioReady={(event) => {
-                const current = event.api.getState();
-                console.log('[AG Studio] initial state', current);
-                setStudioState(current);
-              }}
-              onStateUpdated={(event) => {
-                console.log('[AG Studio] state updated', event.state);
-                const { undo, redo } = event.api.getHistory();
-                setStudioState(event.state);
-                setHistory({ canUndo: undo.length > 0, canRedo: redo.length > 0 });
-              }}
-            />
-          </AgStudioProvider>
+          <div className="relative h-full min-h-0">
+            <div className="h-full" aria-hidden={invoicePageUnavailable}>
+              <AgStudioProvider licenseKey={licenseKey} modules={ai ? [AgStudioAiModule] : undefined}>
+                <AgStudio
+                  style={{ height: '100%', width: '100%' }}
+                  theme={agStudioPayPalTheme}
+                  layout={{ widgetBorderEnabled: true }}
+                  data={studioData}
+                  ai={ai}
+                  initialState={initialState}
+                  mode={mode}
+                  onApiReady={(event) => {
+                    apiRef.current = event.api;
+                  }}
+                  onStudioReady={(event) => {
+                    const current = event.api.getState();
+                    console.log('[AG Studio] initial state', current);
+                    setStudioState(current);
+                  }}
+                  onStateUpdated={(event) => {
+                    console.log('[AG Studio] state updated', event.state);
+                    const { undo, redo } = event.api.getHistory();
+                    setStudioState(event.state);
+                    setHistory({ canUndo: undo.length > 0, canRedo: redo.length > 0 });
+                  }}
+                />
+              </AgStudioProvider>
+            </div>
+            {invoicePageUnavailable && <div className="absolute inset-0 z-10 bg-pp-canvas"><InvoicePermissionUnavailable /></div>}
+          </div>
+        ) : invoicePageUnavailable ? (
+          <InvoicePermissionUnavailable />
         ) : (
           <EmptyData />
         )}

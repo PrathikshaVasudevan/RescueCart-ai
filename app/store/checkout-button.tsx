@@ -30,6 +30,7 @@ export default function CheckoutButton() {
   const containerRef = useRef<HTMLDivElement>(null);
   const checkoutLockRef = useRef(false);
   const currentOrderIdRef = useRef<string | null>(null);
+  const idempotencyKeyRef = useRef<string | null>(null);
 
   const [message, setMessage] = useState(
     'Loading PayPal checkout...'
@@ -98,6 +99,8 @@ export default function CheckoutButton() {
 
             checkoutLockRef.current = true;
             currentOrderIdRef.current = null;
+            const idempotencyKey = idempotencyKeyRef.current ?? crypto.randomUUID();
+            idempotencyKeyRef.current = idempotencyKey;
 
             setMessage('Creating your checkout...');
 
@@ -106,12 +109,16 @@ export default function CheckoutButton() {
                 '/api/checkout',
                 {
                   method: 'POST',
+                  headers: { 'Idempotency-Key': idempotencyKey },
                 }
               );
 
               const result = await response.json();
 
               if (!response.ok || !result.id) {
+                if (result.code === 'IDEMPOTENCY_WINDOW_EXPIRED') {
+                  throw new Error('IDEMPOTENCY_WINDOW_EXPIRED');
+                }
                 throw new Error(
                   result.error ||
                     'Could not create order.'
@@ -127,8 +134,9 @@ export default function CheckoutButton() {
               checkoutLockRef.current = false;
 
               setMessage(
-                'Could not start checkout. ' +
-                  'Please check payment status before retrying.'
+                error instanceof Error && error.message === 'IDEMPOTENCY_WINDOW_EXPIRED'
+                  ? 'Checkout status is uncertain. Contact the merchant before starting another payment.'
+                  : 'Could not start checkout. Please check payment status before retrying.'
               );
 
               throw error;
@@ -167,20 +175,26 @@ export default function CheckoutButton() {
               const result = await response.json();
 
               if (
-                result.status === 'COMPLETED' &&
+                result.status === 'completed' &&
                 result.databaseSync === 'completed'
               ) {
+                idempotencyKeyRef.current = null;
                 setMessage(
                   `Payment completed! Order: ${result.id}`
                 );
               } else if (
-                result.status === 'COMPLETED' &&
+                result.status === 'completed' &&
                 result.databaseSync === 'required'
               ) {
                 setMessage(
                   'Payment succeeded at PayPal, ' +
                     'but payment record needs reconciliation.'
                 );
+              } else if (result.status === 'failed') {
+                idempotencyKeyRef.current = null;
+                setMessage('PayPal confirmed that this payment failed.');
+              } else if (result.status === 'capture_pending') {
+                setMessage('Payment is still processing. Check its status before trying again.');
               } else if (response.status === 202) {
                 setMessage(
                   'Payment is not confirmed as completed yet. ' +
@@ -238,7 +252,7 @@ export default function CheckoutButton() {
 
               const result = await response.json();
 
-              if (!response.ok) {
+              if (!response.ok && result.status !== 'completed') {
                 setMessage(
                   'Checkout closed. Payment status needs verification.'
                 );
@@ -247,6 +261,7 @@ export default function CheckoutButton() {
 
               switch (result.status) {
                 case 'completed':
+                  idempotencyKeyRef.current = null;
                   setMessage(
                     `Payment completed! Order: ${orderId}`
                   );
@@ -257,6 +272,15 @@ export default function CheckoutButton() {
                     'Payment approved but not completed. ' +
                       'Please wait for verification.'
                   );
+                  break;
+
+                case 'capture_pending':
+                  setMessage('Payment is still processing. Please check again shortly.');
+                  break;
+
+                case 'failed':
+                  setMessage('PayPal confirmed that this payment failed.');
+                  idempotencyKeyRef.current = null;
                   break;
 
                 case 'pending':
