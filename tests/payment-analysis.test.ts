@@ -11,7 +11,7 @@ import {
   type PaymentAnalysisDraft,
   type PaymentAnalysisFacts,
 } from "../lib/payment-analysis";
-import { isValidRecoveryAuthorization } from "../lib/recovery-auth";
+import { isRecoveryProtectedPath, isValidRecoveryAuthorization } from "../lib/recovery-auth";
 
 const baseFacts: PaymentAnalysisFacts = {
   status: "unknown",
@@ -298,4 +298,15 @@ test("unauthorized or missing Recovery Centre credentials are rejected", () => {
   assert.equal(isValidRecoveryAuthorization(null, "merchant", "password"), false);
   assert.equal(isValidRecoveryAuthorization("Basic aW52YWxpZA==", "merchant", "password"), false);
   assert.equal(isValidRecoveryAuthorization(`Basic ${Buffer.from("merchant:password").toString("base64")}`, "merchant", "password"), true);
+});
+
+test("route protection is limited to Recovery Centre pages and APIs", () => {
+  for (const path of ["/", "/store", "/api/checkout", "/api/checkout/capture", "/api/checkout/status", "/dashboard"]) {
+    assert.equal(isRecoveryProtectedPath(path), false, `${path} should remain public`);
+  }
+  for (const path of ["/recovery", "/recovery/", "/recovery/payments/ORDER", "/api/recovery", "/api/recovery/analyze"]) {
+    assert.equal(isRecoveryProtectedPath(path), true, `${path} should require Recovery Centre authentication`);
+  }
+  assert.equal(isRecoveryProtectedPath("/recovery-extra"), false);
+  assert.equal(isRecoveryProtectedPath("/api/recovery-extra"), false);
 });
