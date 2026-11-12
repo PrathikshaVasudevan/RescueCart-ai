@@ -1,7 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { isValidRecoveryAuthorization } from "@/lib/recovery-auth";
+import { isRecoveryProtectedPath, isValidRecoveryAuthorization } from "@/lib/recovery-auth";
 
 export function proxy(request: NextRequest) {
+  if (!isRecoveryProtectedPath(request.nextUrl.pathname)) {
+    return NextResponse.next();
+  }
+
   if (!process.env.RECOVERY_CENTRE_USERNAME || !process.env.RECOVERY_CENTRE_PASSWORD) {
     return new NextResponse("Recovery Centre access is not configured.", {
       status: 503,
