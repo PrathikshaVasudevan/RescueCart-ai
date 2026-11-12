@@ -17,6 +17,8 @@ const files = [
   'tests/dashboard-data.test.ts',
   'tests/payment-analysis.test.ts',
   'tests/paypal-diagnostics.test.ts',
+  'tests/public-access.test.ts',
+  'proxy.ts',
 ];
 
 try {
@@ -45,7 +47,7 @@ try {
   }
 
   if (process.exitCode !== 1) {
-    const testPaths = ['checkout-lifecycle.test.js', 'dashboard-data.test.js', 'payment-analysis.test.js', 'paypal-diagnostics.test.js']
+    const testPaths = ['checkout-lifecycle.test.js', 'dashboard-data.test.js', 'payment-analysis.test.js', 'paypal-diagnostics.test.js', 'public-access.test.js']
       .map((name) => path.join(output, 'tests', name));
     const nodePath = [path.join(root, 'node_modules'), process.env.NODE_PATH].filter(Boolean).join(path.delimiter);
     const result = spawnSync(process.execPath, ['--test', ...testPaths], {

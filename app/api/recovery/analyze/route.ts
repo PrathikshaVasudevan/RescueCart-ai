@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { isValidPayPalOrderId } from "@/lib/checkout-lifecycle";
 import { checkoutRepository } from "@/lib/checkout-store";
 import { analyzeVerifiedPayPalOrder, geminiConfiguration, PaymentAnalysisError, paymentAnalysisErrorDiagnostics, requestGeminiPaymentAnalysisDraft } from "@/lib/payment-analysis";
-import { isValidRecoveryAuthorization } from "@/lib/recovery-auth";
 import { getCheckoutOrder, PayPalApiError, paypalApiErrorDiagnostics } from "@/lib/paypal";
 
 export const runtime = "nodejs";
@@ -49,10 +48,6 @@ async function readOrderId(request: Request): Promise<{ orderId?: string; error?
 }
 
 export async function POST(request: Request) {
-  if (!isValidRecoveryAuthorization(request.headers.get("authorization"))) {
-    return NextResponse.json({ error: "Merchant sign-in is required" }, { status: 401, headers: { "Cache-Control": "no-store" } });
-  }
-
   let input: Awaited<ReturnType<typeof readOrderId>>;
   try {
     input = await readOrderId(request);

@@ -1,10 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
 
-export function isRecoveryProtectedPath(pathname: string): boolean {
-  return pathname === "/recovery" || pathname.startsWith("/recovery/") ||
-    pathname === "/api/recovery" || pathname.startsWith("/api/recovery/");
-}
-
 export function isValidRecoveryAuthorization(
   authorization: string | null,
   username = process.env.RECOVERY_CENTRE_USERNAME,
